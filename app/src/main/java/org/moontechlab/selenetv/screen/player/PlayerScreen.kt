@@ -248,6 +248,10 @@ fun PlayerScreen(launch: PlayerLaunch, onExit: () -> Unit, modifier: Modifier = 
                 speedResults = HashMap(acc.filterValues { it.state != org.moontechlab.selenetv.model.SpeedTestState.TESTING })
                 speedTesting = false
                 throw e
+            } catch (e: Exception) {
+                android.util.Log.e("PlayerScreen", "测速优选异常中止", e)
+                speedResults = HashMap(acc.filterValues { it.state != org.moontechlab.selenetv.model.SpeedTestState.TESTING })
+                speedTesting = false
             }
         }
     }

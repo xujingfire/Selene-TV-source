@@ -410,6 +410,11 @@ fun DetailScreen(entry: DetailEntry, onBack: () -> Unit, onGoToSearch: (String) 
                 val settled = acc.filterValues { it.state != SpeedTestState.TESTING }
                 state = state.copy(speedResults = HashMap(settled), speedTesting = false)
                 throw e
+            } catch (e: Exception) {
+                // 兜底：测速链路的未预期异常不能击穿到主线程导致闪退；收起「测速中」并保留已出结果。
+                android.util.Log.e("DetailScreen", "测速优选异常中止", e)
+                val settled = acc.filterValues { it.state != SpeedTestState.TESTING }
+                state = state.copy(speedResults = HashMap(settled), speedTesting = false)
             }
         }
     }

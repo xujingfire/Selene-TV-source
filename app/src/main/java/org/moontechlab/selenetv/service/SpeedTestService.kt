@@ -1,5 +1,6 @@
 package org.moontechlab.selenetv.service
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -42,6 +43,7 @@ object SpeedTestService {
 
     private const val SEGMENT_SAMPLE = 3              // 取前 N 个分片测速
     private const val SEGMENT_BYTE_BUDGET = 512 * 1024 // 每分片最多采样字节数（512KB）
+    private const val MAX_PLAYLIST_BYTES = 2 * 1024 * 1024 // m3u8 文本读取上限（防异常大响应 OOM）
     private const val MAX_CONCURRENT_SOURCES = 6      // 源级并发上限
     private const val PER_SOURCE_TIMEOUT_MS = 8000L   // 单源协程超时
     private const val CALL_TIMEOUT_MS = 8000L         // 单次 HTTP 调用硬上限
@@ -78,9 +80,17 @@ object SpeedTestService {
             val url = testUrl(source) ?: return@mapNotNull null
             val key = "${source.source}+${source.id}"
             async(Dispatchers.IO) {
-                val result = sourceGate.withPermit {
-                    withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) { probe(url) }
-                } ?: SourceSpeed(state = SpeedTestState.FAILED)
+                // 单个源的任何异常（非法 URL、读取中断、解析失败等）都只记 FAILED，
+                // 绝不能逃逸到主线程 scope 导致整个 App 闪退。
+                val result = try {
+                    sourceGate.withPermit {
+                        withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) { probe(url) }
+                    } ?: SourceSpeed(state = SpeedTestState.FAILED)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    SourceSpeed(state = SpeedTestState.FAILED)
+                }
                 onResult(key, result)
             }
         }.awaitAll()
@@ -276,7 +286,24 @@ object SpeedTestService {
 
     private suspend fun getText(url: String): String? {
         val resp = execute(request(url)) ?: return null
-        return resp.use { if (it.isSuccessful) it.body?.string() else null }
+        return resp.use {
+            if (!it.isSuccessful) return@use null
+            val stream = it.body?.byteStream() ?: return@use null
+            // 正常播放列表只有几十 KB；若服务端把大文件（mp4/错误页）当 m3u8 返回，
+            // 限制读取上限，避免 body.string() 一次性拉满内存导致 OOM 闪退。
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(16 * 1024)
+            var total = 0
+            while (total < MAX_PLAYLIST_BYTES) {
+                val n = stream.read(buf)
+                if (n < 0) break
+                val keep = minOf(n, MAX_PLAYLIST_BYTES - total)
+                out.write(buf, 0, keep)
+                total += keep
+                if (keep < n) break
+            }
+            out.toString("UTF-8")
+        }
     }
 
     private suspend fun getBytes(url: String): ByteArray? {
