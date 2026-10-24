@@ -7,9 +7,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +32,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -345,6 +349,7 @@ private fun LoginScreenContent(
                     placeholder = "例如: https://example.com/sub/xxx",
                     focusRequester = subscriptionUrlFocusRequester,
                     downFocusRequester = localLoginButtonFocusRequester,
+                    onImeAction = { handleLocalModeLogin() }
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -402,7 +407,8 @@ private fun LoginScreenContent(
                     isPassword = true,
                     focusRequester = passwordFocusRequester,
                     upFocusRequester = usernameFocusRequester,
-                    downFocusRequester = loginButtonFocusRequester
+                    downFocusRequester = loginButtonFocusRequester,
+                    onImeAction = { handleLogin() }
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -466,7 +472,8 @@ private fun LoginTextField(
     isPassword: Boolean = false,
     focusRequester: FocusRequester,
     upFocusRequester: FocusRequester? = null,
-    downFocusRequester: FocusRequester? = null
+    downFocusRequester: FocusRequester? = null,
+    onImeAction: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
@@ -484,6 +491,34 @@ private fun LoginTextField(
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
+                .onKeyEvent { keyEvent ->
+                    if (keyEvent.type == KeyEventType.KeyDown) {
+                        when (keyEvent.key) {
+                            Key.DirectionDown -> {
+                                if (downFocusRequester != null) {
+                                    downFocusRequester.requestFocus()
+                                    true
+                                } else false
+                            }
+                            Key.DirectionUp -> {
+                                if (upFocusRequester != null) {
+                                    upFocusRequester.requestFocus()
+                                    true
+                                } else false
+                            }
+                            Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                                if (onImeAction != null) {
+                                    onImeAction()
+                                    true
+                                } else if (downFocusRequester != null) {
+                                    downFocusRequester.requestFocus()
+                                    true
+                                } else false
+                            }
+                            else -> false
+                        }
+                    } else false
+                }
                 .focusProperties {
                     // 指定上下导航的目标
                     if (upFocusRequester != null) up = upFocusRequester
@@ -507,6 +542,13 @@ private fun LoginTextField(
             textStyle = TextStyle(
                 color = TextDefault,
                 fontSize = 14.sp
+            ),
+            keyboardOptions = KeyboardOptions(
+                imeAction = if (onImeAction != null) ImeAction.Done else ImeAction.Next
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = { onImeAction?.invoke() },
+                onNext = { downFocusRequester?.requestFocus() }
             ),
             cursorBrush = SolidColor(Color.White),
             singleLine = true,
@@ -552,6 +594,7 @@ private fun LoginButton(
         onClick = { if (enabled) onClick() },
         modifier = modifier
             .fillMaxWidth()
+            .clickable(enabled = enabled) { onClick() }
             .focusProperties {
                 if (upFocusRequester != null) up = upFocusRequester
                 if (downFocusRequester != null) down = downFocusRequester
